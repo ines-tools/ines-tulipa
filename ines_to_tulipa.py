@@ -124,9 +124,17 @@ def main():
 
 def add_periods(source_db,target_db):
 
-    for period in source_db.get_entity_items(entity_class_name = "period"):
-        add_entity(target_db,"year",(period["name"][1:],))
-        add_entity(target_db,"commission",(period["name"][1:],))
+    duration      = json.loads(source_db.get_parameter_value_items(entity_class_name = "solve_pattern", parameter_definition_name = "duration")[0]["value"])["data"]
+    periods       = json.loads(source_db.get_parameter_value_items(entity_class_name = "solve_pattern", parameter_definition_name = "period")[0]["value"])["data"]
+    resolution    = json.loads(source_db.get_parameter_value_items(entity_class_name = "solve_pattern", parameter_definition_name = "time_resolution")[0]["value"])["data"]
+    
+    steps = pd.to_timedelta(duration) / pd.to_timedelta(resolution)
+    for period in periods:
+        add_entity(target_db,"year",(period[1:],))
+        add_parameter_value(target_db,"year","is_milestone","Base",(period[1:],),True)
+        add_parameter_value(target_db,"year","length","Base",(period[1:],),steps)
+        add_parameter_value(target_db,"year","timeframe_data","Base",(period[1:],),{"type":"map","index_type":"str","index_name":"period","data":{1:steps}})
+        add_entity(target_db,"commission",(period[1:],))
     
     try:
         target_db.commit_session("Added periods")
@@ -408,7 +416,7 @@ def add_flow_relationships(source_db,target_db):
         starttime[period] = json.loads(source_db.get_parameter_value_item(entity_class_name = "period", entity_byname = (period,), alternative_name = "Base", parameter_definition_name = "start_time")["value"])["data"]
         year_repr[period] = source_db.get_parameter_value_item(entity_class_name = "period", entity_byname = (period,), alternative_name = "Base", parameter_definition_name = "years_represented")["parsed_value"]
 
-    duration      = json.loads(source_db.get_parameter_value_items(entity_class_name = "solve_pattern", parameter_definition_name = "duration")[0]["value"])
+    duration      = json.loads(source_db.get_parameter_value_items(entity_class_name = "solve_pattern", parameter_definition_name = "duration")[0]["value"])["data"]
     starttime_sp  = json.loads(source_db.get_parameter_value_items(entity_class_name = "solve_pattern", parameter_definition_name = "start_time")[0]["value"])["data"]
     resolution    = json.loads(source_db.get_parameter_value_items(entity_class_name = "solve_pattern", parameter_definition_name = "time_resolution")[0]["value"])["data"]
     
@@ -619,13 +627,66 @@ def add_emissions(source_db,target_db):
 
 def add_profiles(source_db,target_db):
 
-    parameters = {"storage_state_upper_limit":"max_storage_level","storage_state_lower_limit":"min_storage_level","availability":"availability","profile_fix":"availability","profile_upper_limit":"availability"}
+    years  = [year["name"] for year in target_db.get_entity_items(entity_class_name = "year")]
+    yearsc = [year["name"] for year in target_db.get_entity_items(entity_class_name = "year")]
+
+    duration      = json.loads(source_db.get_parameter_value_items(entity_class_name = "solve_pattern", parameter_definition_name = "duration")[0]["value"])["data"]
+    starttime_sp  = json.loads(source_db.get_parameter_value_items(entity_class_name = "solve_pattern", parameter_definition_name = "start_time")[0]["value"])["data"]
+    resolution    = json.loads(source_db.get_parameter_value_items(entity_class_name = "solve_pattern", parameter_definition_name = "time_resolution")[0]["value"])["data"]
+
+    parameters = {"storage_state_upper_limit":"max_storage_level","storage_state_lower_limit":"min_storage_level","availability":"availability","profile_fix":"availability","profile_limit_upper":"availability"}
     for parameter in parameters:
-        for dict_profile in source_db.get_paramter_value_items(parameter_definition_name = parameter):
-            1
+        for dict_profile in source_db.get_parameter_value_items(parameter_definition_name = parameter):
+            investment_method = "investment_method"
+            if dict_profile["entity_class_name"] in ["node__to_unit","unit__to_node"]:
+                target_name = dict_profile["entity_byname"][0]  if dict_profile["entity_class_name"] == "unit__to_node" else dict_profile["entity_byname"][1]
+                entity_class = "unit"
+            elif dict_profile["entity_class_name"] == "node" or dict_profile["entity_class_name"] == "unit" :
+                target_name = dict_profile["entity_byname"][0]
+                entity_class = dict_profile["entity_class_name"]
+                investment_method = "storage_investment_method" if dict_profile["entity_class_name"] == "node" else "investment_method"
+
+            profile_name = target_name+"_"+parameters[parameter]
+            add_entity(target_db,"profile",(profile_name,))
+            investment_method_value = source_db.get_parameter_value_item(entity_class_name = entity_class, parameter_definition_name = investment_method, alternative_name = "Base", entity_byname = (target_name,))
+            if investment_method_value:
+                range_yearsc = [min(yearsc)] if investment_method_value["parsed_value"] == "not_allowed" else yearsc
+                for yearc in range_yearsc:
+                    add_entity(target_db,"asset__commission__profile",(target_name,yearc,profile_name))
+                    add_parameter_value(target_db,"asset__commission__profile","profile_type","Base",(target_name,yearc,profile_name),parameters[parameter])
+                    if dict_profile["type"] == "float":
+                        add_parameter_value(target_db,"asset__commission__profile","is_timeframe_profile","Base",(target_name,yearc,profile_name),True)
+            for year in years:
+                add_entity(target_db,"profile__year",(profile_name,year))
+
+            if dict_profile["type"] == "map":
+                map_table = convert_map_to_table(dict_profile["parsed_value"])
+                index_names = nested_index_names(dict_profile["parsed_value"])
+                data = pd.DataFrame(map_table, columns=index_names + ["value"]).set_index(index_names[0])
+                data.index = data.index.astype("string")
+                if any(i in data.index for i in starttime_sp):
+                    for index, element in enumerate(starttime_sp):
+                        try:
+                            alternative_name = f"wy{str(pd.Timestamp(element).year)}"
+                            add_alternative(target_db,alternative_name)
+                        except:
+                            pass
+                        steps = int(pd.to_timedelta(duration) / pd.to_timedelta(resolution))
+                        df_data = data.iloc[data.index.tolist().index(element):data.index.tolist().index(element)+int(steps),data.columns.tolist().index("value")].tolist()
+                        profile_map = {"type":"map","index_type":"float","index_name":"period","data":{1.0:{"type":"map","index_type":"str","index_name":"timestep","data":dict(zip(range(1,steps+1),df_data))}}}
+                        for year in years:
+                            add_parameter_value(target_db,"profile__year","profile_period_timestep",alternative_name,(profile_name,year),profile_map)
+                         
+            elif dict_profile["type"] == "float":
+                # timeframe profile
+                profile_map = {"type":"map","index_type":"float","index_name":"period","data":{1.0:dict_profile["parsed_value"]}}
+                for year in years:
+                    add_parameter_value(target_db,"profile__year","profile_period",dict_profile["alternative_name"],(profile_name,year),profile_map)
+                        
+
     # Flow profile treatment, positive -> inflow, negative -> demand
-    for dict_inflow in source_db.get_paramter_value_items(parameter_definition_name = "flow_profile"):
-        1
+    '''for dict_inflow in source_db.get_parameter_value_items(parameter_definition_name = "flow_profile"):
+        1'''
 
     try:
         target_db.commit_session("Added profiles")

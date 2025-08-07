@@ -209,6 +209,10 @@
             "storage"
         ],
         [
+            "flow_profile_type",
+            "availability"
+        ],
+        [
             "profile_type",
             "availability"
         ],
@@ -508,7 +512,7 @@
             "asset__asset__year__profile",
             "profile_type",
             null,
-            null,
+            "flow_profile_type",
             null
         ],
         [
@@ -564,7 +568,7 @@
             "asset__commission__profile",
             "profile_type",
             null,
-            null,
+            "profile_type",
             null
         ],
         [
@@ -692,6 +696,13 @@
             null,
             null,
             null
+        ],
+        [
+            "profile__year",
+            "profile_period",
+            null,
+            null,
+            "1-D map representing the profile per period if timeframe profile"
         ],
         [
             "profile__year",
