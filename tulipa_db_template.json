@@ -8,10 +8,10 @@
             true
         ],
         [
-            "carrier",
+            "asset_flow",
             [],
             null,
-            280376907919569,
+            281472116191989,
             true
         ],
         [
@@ -36,17 +36,20 @@
             true
         ],
         [
-            "type",
-            [],
-            null,
-            280378325594117,
-            true
-        ],
-        [
             "year",
             [],
             null,
             280376891207795,
+            true
+        ],
+        [
+            "asset__asset",
+            [
+                "asset",
+                "asset"
+            ],
+            null,
+            null,
             true
         ],
         [
@@ -70,20 +73,20 @@
             true
         ],
         [
-            "asset__type",
+            "asset__year",
             [
                 "asset",
-                "type"
+                "year"
             ],
             null,
             null,
             true
         ],
         [
-            "asset__year",
+            "asset_flow__asset_flow",
             [
-                "asset",
-                "year"
+                "asset_flow",
+                "asset_flow"
             ],
             null,
             null,
@@ -104,17 +107,6 @@
             [
                 "profile",
                 "year"
-            ],
-            null,
-            null,
-            true
-        ],
-        [
-            "asset__asset__carrier",
-            [
-                "asset",
-                "asset",
-                "carrier"
             ],
             null,
             null,
@@ -187,6 +179,62 @@
             null,
             null,
             true
+        ]
+    ],
+    "superclass_subclasses": [
+        [
+            "asset_flow",
+            "asset__asset__year"
+        ]
+    ],
+    "parameter_value_lists": [
+        [
+            "asset_type",
+            "hub"
+        ],
+        [
+            "asset_type",
+            "consumer"
+        ],
+        [
+            "asset_type",
+            "producer"
+        ],
+        [
+            "asset_type",
+            "conversion"
+        ],
+        [
+            "asset_type",
+            "storage"
+        ],
+        [
+            "profile_type",
+            "availability"
+        ],
+        [
+            "profile_type",
+            "demand"
+        ],
+        [
+            "profile_type",
+            "inflow"
+        ],
+        [
+            "profile_type",
+            "max_storage_level"
+        ],
+        [
+            "profile_type",
+            "min_storage_level"
+        ],
+        [
+            "profile_type",
+            "max_energy"
+        ],
+        [
+            "profile_type",
+            "min_energy"
         ]
     ],
     "parameter_definitions": [
@@ -304,6 +352,13 @@
         ],
         [
             "asset",
+            "type",
+            null,
+            "asset_type",
+            null
+        ],
+        [
+            "asset",
             "unit_commitment",
             null,
             null,
@@ -331,43 +386,50 @@
             null
         ],
         [
-            "asset__asset__carrier",
+            "asset__asset",
             "capacity",
             null,
             null,
             null
         ],
         [
-            "asset__asset__carrier",
+            "asset__asset",
             "discount_rate",
             null,
             null,
             null
         ],
         [
-            "asset__asset__carrier",
+            "asset__asset",
             "economic_lifetime",
             null,
             null,
             null
         ],
         [
-            "asset__asset__carrier",
+            "asset__asset",
             "investment_integer",
             null,
             null,
             null
         ],
         [
-            "asset__asset__carrier",
+            "asset__asset",
             "is_transport",
             null,
             null,
             null
         ],
         [
-            "asset__asset__carrier",
+            "asset__asset",
             "technical_lifetime",
+            null,
+            null,
+            null
+        ],
+        [
+            "asset__asset__commission",
+            "capacity_coefficient",
             null,
             null,
             null
@@ -382,13 +444,6 @@
         [
             "asset__asset__commission",
             "fixed_cost",
-            null,
-            null,
-            null
-        ],
-        [
-            "asset__asset__commission",
-            "flow_coefficient_in_capacity_constraint",
             null,
             null,
             null
@@ -500,14 +555,14 @@
         ],
         [
             "asset__commission__profile",
-            "profile_type",
+            "is_timeframe_profile",
             null,
             null,
             null
         ],
         [
             "asset__commission__profile",
-            "profile_type_storage",
+            "profile_type",
             null,
             null,
             null
@@ -597,6 +652,27 @@
             null
         ],
         [
+            "asset_flow__asset_flow",
+            "constant",
+            null,
+            null,
+            "Constant C in flow_1 {==;>=;<=} C + A x flow_2 relationship constraint"
+        ],
+        [
+            "asset_flow__asset_flow",
+            "ratio",
+            null,
+            null,
+            "Ratio A in flow_1 {==;>=;<=} C + A x flow_2 relationship constraint"
+        ],
+        [
+            "asset_flow__asset_flow",
+            "sense",
+            null,
+            null,
+            "Is the sense in flow_1 {==;>=;<=} C + A x flow_2 relationship constraint, equal to, greater than or less than."
+        ],
+        [
             "group__year",
             "invest_method",
             null,
@@ -619,17 +695,10 @@
         ],
         [
             "profile__year",
-            "profile_period",
+            "profile_period_timestep",
             null,
             null,
-            null
-        ],
-        [
-            "profile__year",
-            "profile_time",
-            null,
-            null,
-            null
+            "2-D map representing the profile by the period and timestep"
         ],
         [
             "year",
@@ -643,28 +712,21 @@
             "length",
             null,
             null,
-            null
+            "Number of modeled hours per year"
         ],
         [
             "year",
-            "num_timesteps",
+            "rep_period_data",
             null,
             null,
-            null
-        ],
-        [
-            "year",
-            "num_timesteps_period",
-            null,
-            null,
-            null
+            "2-D map representing the representative period, number of timesteps per representative period, and resolution in the representative period. Columns: rep_period, num_timesteps and resolution"
         ],
         [
             "year",
             "rep_period_mapping",
             null,
             null,
-            null
+            "2-D map representing the representative periods per period and the weight of each representative period. Columns: period, rep_period and weight."
         ],
         [
             "year",
@@ -672,6 +734,13 @@
             null,
             null,
             null
+        ],
+        [
+            "year",
+            "timeframe_data",
+            null,
+            null,
+            "1-D map representing periods and number of timesteps period. Columns: period and num_timesteps"
         ]
     ]
 }
