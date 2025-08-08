@@ -112,6 +112,8 @@ def main():
             add_existing_units(source_db,target_db)
             print("adding investment and retirement methods")
             add_investable_decommisionable(source_db,target_db)
+            print("adding fixed units")
+            add_fixed_units(source_db,target_db)
             print("adding flow relationships")
             add_flow_relationships(source_db,target_db)
             print("adding costs")
@@ -406,6 +408,60 @@ def add_investable_decommisionable(source_db,target_db):
     except:
         print("commit adding ables error")
 
+def add_fixed_units(source_db,target_db):
+
+    # units and storages and links
+    existing_name = {"unit":"units_fix_cumulative","node":"storages_fix_cumulative","link":"links_fix_cumulative"}
+    target_param = {"unit":"initial_units","node":"initial_storage_units","link":"initial_export_units"}
+    years = [year["name"] for year in target_db.get_entity_items(entity_class_name = "year")]
+    if_decommissionable = target_db.get_parameter_value_items(parameter_definition_name = "decommissionable")
+    if_investable = target_db.get_parameter_value_items(parameter_definition_name = "investable")
+    
+    for entity_class in ["unit","node","link"]:
+        existing_parameters = source_db.get_parameter_value_items(entity_class_name = entity_class, parameter_definition_name = existing_name[entity_class])
+        for existing_parameter in existing_parameters:
+            for year in years:
+                if entity_class != "link":
+                    entity_class_target = "asset__commission__year"
+                    entity_bynames = [(existing_parameter["entity_byname"][0],year,year)]
+                else:
+                    entity_class_target = "asset__asset__commission__year"
+                    entity_bynames = [(entity_link["entity_byname"][0],entity_link["entity_byname"][2],year,year) for entity_link in source_db.get_entity_items(entity_class_name = "node__link__node") if existing_parameter["entity_byname"][0] == entity_link["entity_byname"][1]]
+                for entity_byname in entity_bynames:
+                    try:
+                        add_entity(target_db,entity_class_target,entity_byname)
+                    except:
+                        print("not added",entity_class_target,entity_byname)
+                        pass
+                    if existing_parameter["type"] == "map":
+                        existing_dict = dict(zip([i[1:] for i in existing_parameter["parsed_value"].indexes],existing_parameter["parsed_value"].values))
+                        cap_value = existing_dict[year]
+                    elif  existing_parameter["type"] == "float": 
+                        cap_value = existing_parameter["parsed_value"]
+
+                    add_parameter_value(target_db,entity_class_target,target_param[entity_class],existing_parameter["alternative_name"],entity_byname,cap_value)
+                
+                    target_comparison = (existing_parameter["entity_byname"][0],) if entity_class != "link" else (existing_parameter["entity_byname"][0],existing_parameter["entity_byname"][1])
+                    limit_list = 1  if entity_class != "link" else 2
+                    try:
+                        for decom_item in [i for i in if_decommissionable if i["entity_byname"][:limit_list] == target_comparison]:
+                            target_db.remove_item("parameter_value",decom_item["id"])
+                    except:
+                        pass
+
+                    target_comparison = (existing_parameter["entity_byname"][0],) if entity_class != "link" else (existing_parameter["entity_byname"][0],existing_parameter["entity_byname"][1])
+                    limit_list = 1  if entity_class != "link" else 2
+                    try:
+                        for inves_item in [i for i in if_investable if i["entity_byname"][:limit_list] == target_comparison]:
+                            target_db.remove_item("parameter_value",inves_item["id"])
+                    except:
+                        pass
+                    
+    try:
+        target_db.commit_session("Added fixed units")
+    except:
+        print("commit adding fixed units error")
+
 def add_flow_relationships(source_db,target_db):
 
     years  = [year["name"] for year in target_db.get_entity_items(entity_class_name = "year")]
@@ -654,7 +710,7 @@ def add_profiles(source_db,target_db):
                 for yearc in range_yearsc:
                     add_entity(target_db,"asset__commission__profile",(target_name,yearc,profile_name))
                     add_parameter_value(target_db,"asset__commission__profile","profile_type","Base",(target_name,yearc,profile_name),parameters[parameter])
-                    if dict_profile["type"] == "float":
+                    if dict_profile["type"] == "float" and parameters[parameter] in ["max_storage_level","max_energy","min_storage_level","min_energy"]:
                         add_parameter_value(target_db,"asset__commission__profile","is_timeframe_profile","Base",(target_name,yearc,profile_name),True)
             for year in years:
                 add_entity(target_db,"profile__year",(profile_name,year))
@@ -679,15 +735,80 @@ def add_profiles(source_db,target_db):
                          
             elif dict_profile["type"] == "float":
                 # timeframe profile
-                profile_map = {"type":"map","index_type":"float","index_name":"period","data":{1.0:dict_profile["parsed_value"]}}
+                if  parameters[parameter] in ["max_storage_level","max_energy","min_storage_level","min_energy"]:
+                    profile_map = {"type":"map","index_type":"float","index_name":"period","data":{1.0:dict_profile["parsed_value"]}}
+                else:
+                    profile_map = {"type":"map","index_type":"float","index_name":"period","data":{1.0:{"type":"map","index_type":"str","index_name":"timestep","data":dict(zip(range(1,steps+1),dict_profile["parsed_value"]*np.ones(steps)))}}}
                 for year in years:
                     add_parameter_value(target_db,"profile__year","profile_period",dict_profile["alternative_name"],(profile_name,year),profile_map)
-                        
+                       
 
     # Flow profile treatment, positive -> inflow, negative -> demand
-    '''for dict_inflow in source_db.get_parameter_value_items(parameter_definition_name = "flow_profile"):
-        1'''
+    for dict_inflow in source_db.get_parameter_value_items(parameter_definition_name = "flow_profile"):
+        target_name = dict_inflow["entity_byname"][0]
+        node_type = source_db.get_parameter_value_item(entity_class_name = "node", entity_byname = dict_inflow["entity_byname"], parameter_definition_name = "node_type", alternative_name = "Base")["parsed_value"]
+        if node_type == "storage":
+            investment_method_value = source_db.get_parameter_value_item(entity_class_name = "node", parameter_definition_name = "storage_investment_method", alternative_name = "Base", entity_byname = (target_name,))
+            range_yearsc = [min(yearsc)] if investment_method_value["parsed_value"] == "not_allowed" else yearsc
+        else:
+            range_yearsc = yearsc
+        profile_name = target_name+"_"+ ("demand" if (np.mean(dict_inflow["parsed_value"]) if dict_inflow["type"] == "float" else np.mean(dict_inflow["parsed_value"].values)) < 0.0 else "inflow")
+        add_entity(target_db,"profile",(profile_name,))
+        # based on node type then commission years
+        for yearc in range_yearsc:
+            add_entity(target_db,"asset__commission__profile",(target_name,yearc,profile_name))
+            parameter_type = "demand" if (np.mean(dict_inflow["parsed_value"]) if dict_inflow["type"] == "float" else np.mean(dict_inflow["parsed_value"].values)) < 0.0 else "inflow"
+            add_parameter_value(target_db,"asset__commission__profile","profile_type","Base",(target_name,yearc,profile_name),parameter_type)
+        for year in years:
+                add_entity(target_db,"profile__year",(profile_name,year))
+        if dict_inflow["type"] == "map":
+            map_table = convert_map_to_table(dict_inflow["parsed_value"])
+            index_names = nested_index_names(dict_inflow["parsed_value"])
+            data = pd.DataFrame(map_table, columns=index_names + ["value"]).set_index(index_names[0])
+            data.index = data.index.astype("string")
+            if any(i in data.index for i in starttime_sp):
+                for index, element in enumerate(starttime_sp):
+                    try:
+                        alternative_name = f"wy{str(pd.Timestamp(element).year)}"
+                        add_alternative(target_db,alternative_name)
+                    except:
+                        pass
+                    steps = int(pd.to_timedelta(duration) / pd.to_timedelta(resolution))
+                    df_data = ((-1 if parameter_type == "demand" else 1.0)*data.iloc[data.index.tolist().index(element):data.index.tolist().index(element)+int(steps),data.columns.tolist().index("value")]).tolist()
+                    profile_map = {"type":"map","index_type":"float","index_name":"period","data":{1.0:{"type":"map","index_type":"str","index_name":"timestep","data":dict(zip(range(1,steps+1),df_data))}}}
+                    for year in years:
+                        add_parameter_value(target_db,"profile__year","profile_period_timestep",alternative_name,(profile_name,year),profile_map)
+                         
+        elif dict_inflow["type"] == "float":
+            profile_map = {"type":"map","index_type":"float","index_name":"period","data":{1.0:{"type":"map","index_type":"str","index_name":"timestep","data":dict(zip(range(1,steps+1),dict_inflow["parsed_value"]*np.ones(steps)))}}}
+            for year in years:
+                add_parameter_value(target_db,"profile__year","profile_period",dict_inflow["alternative_name"],(profile_name,year),profile_map)
 
+        annual_scales = source_db.get_parameter_value_items(entity_class_name = "node", parameter_definition_name = "flow_annual", entity_byname = dict_inflow["entity_byname"])
+        parameter_name = "peak_demand" if (np.mean(dict_inflow["parsed_value"]) if dict_inflow["type"] == "float" else np.mean(dict_inflow["parsed_value"].values)) < 0.0 else "storage_inflows"
+        if annual_scales:
+            for annual_scale in annual_scales:
+                for year in years:
+                    try:
+                        add_entity(target_db,"asset__year",(target_name,year))
+                    except:
+                        pass
+                    if annual_scale["type"] == "map":
+                        map_table = convert_map_to_table(annual_scale["parsed_value"])
+                        index_names = nested_index_names(annual_scale["parsed_value"])
+                        data = pd.DataFrame(map_table, columns=index_names + ["value"]).set_index(index_names[0])
+                        data.index = data.index.astype("string")
+                        if "y"+year in data.index:
+                            add_parameter_value(target_db,"asset__year",parameter_name,annual_scale["alternative_name"],(target_name,year),data.at["y"+year,"value"])
+                    elif annual_scale["type"] == "float":
+                        add_parameter_value(target_db,"asset__year",parameter_name,annual_scale["alternative_name"],(target_name,year),annual_scale["parsed_value"])
+        else:
+            for year in years:
+                try:
+                    add_entity(target_db,"asset__year",(target_name,year))
+                except:
+                    pass
+                add_parameter_value(target_db,"asset__year",parameter_name,"Base",(target_name,year),1.0)
     try:
         target_db.commit_session("Added profiles")
     except:
