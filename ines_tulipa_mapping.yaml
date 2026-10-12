@@ -1,0 +1,198 @@
+# Parameter mapping shared by ines_to_tulipa.py and tulipa_to_ines.py.
+#
+# direct_parameters: one INES parameter <-> one (or more) Tulipa column(s).
+#   role     - which INES entity / Tulipa row the parameter belongs to:
+#                unit       INES unit             <-> Tulipa producer/conversion asset
+#                unit_main  INES main capacity flow of a unit (unit__to_node or node__to_unit)
+#                           <-> Tulipa producer/conversion asset
+#                unit_flow  INES unit__to_node / node__to_unit <-> Tulipa flow
+#                storage    INES node with node_type storage <-> Tulipa storage asset
+#                link       INES link (between non-storage nodes) <-> Tulipa transport flow
+#                system     INES system <-> Tulipa model_parameters
+#   ines     - INES parameter name
+#   tulipa   - list of [table, column]; the first one is used in the Tulipa -> INES direction
+#   factor   - tulipa_value = ines_value * factor (default 1)
+#   The Tulipa table decides how INES period maps are handled:
+#     asset / flow / model_parameters      -> constant (first period value is used)
+#     *_milestone / *_both                 -> one row per milestone year
+#     *_commission                         -> one row per commission year (= milestone year)
+#
+# Everything that needs more logic than this (entity classification, capacities,
+# existing units, investment methods, profiles, time structure, storage links,
+# commodity nodes, penalties, flow relationships and investment groups) is coded in
+# the two scripts and explained in REPORT.md.
+
+direct_parameters:
+  - {role: unit, ines: lifetime, tulipa: [[asset, technical_lifetime], [asset, economic_lifetime]]}
+  - {role: unit, ines: interest_rate, tulipa: [[asset, discount_rate]]}
+  - {role: unit, ines: investment_uses_integer, tulipa: [[asset, investment_integer]]}
+  - {role: unit, ines: min_uptime, tulipa: [[asset, minimum_up_time]], factor: 0.016666666666666666}
+  - {role: unit, ines: min_downtime, tulipa: [[asset, minimum_down_time]], factor: 0.016666666666666666}
+  - {role: unit, ines: online_cost, tulipa: [[asset_milestone, units_on_cost]]}
+  - {role: unit, ines: efficiency, tulipa: [[asset_commission, conversion_efficiency]]}
+
+  - {role: unit_main, ines: investment_cost, tulipa: [[asset_commission, investment_cost]]}
+  - {role: unit_main, ines: fixed_cost, tulipa: [[asset_commission, fixed_cost]]}
+  - {role: unit_main, ines: ramp_limit_up, tulipa: [[asset, max_ramp_up]], factor: 60}
+  - {role: unit_main, ines: ramp_limit_down, tulipa: [[asset, max_ramp_down]], factor: 60}
+
+  - {role: unit_flow, ines: other_operational_cost, tulipa: [[flow_milestone, operational_cost]]}
+  - {role: unit_flow, ines: conversion_coefficient, tulipa: [[flow_commission, conversion_coefficient]]}
+
+  - {role: storage, ines: storage_capacity, tulipa: [[asset, capacity_storage_energy]]}
+  - {role: storage, ines: storage_lifetime, tulipa: [[asset, technical_lifetime], [asset, economic_lifetime]]}
+  - {role: storage, ines: storage_interest_rate, tulipa: [[asset, discount_rate]]}
+  - {role: storage, ines: storage_investment_uses_integer, tulipa: [[asset, investment_integer_storage_energy]]}
+  - {role: storage, ines: storage_investment_cost, tulipa: [[asset_commission, investment_cost_storage_energy]]}
+  - {role: storage, ines: storage_fixed_cost, tulipa: [[asset_commission, fixed_cost_storage_energy]]}
+  - {role: storage, ines: storage_loss_from_stored_energy, tulipa: [[asset_commission, storage_loss_from_stored_energy]]}
+
+  - {role: link, ines: capacity, tulipa: [[flow, capacity]]}
+  - {role: link, ines: lifetime, tulipa: [[flow, technical_lifetime], [flow, economic_lifetime]]}
+  - {role: link, ines: interest_rate, tulipa: [[flow, discount_rate]]}
+  - {role: link, ines: investment_uses_integer, tulipa: [[flow, investment_integer]]}
+  - {role: link, ines: investment_cost, tulipa: [[flow_commission, investment_cost]]}
+  - {role: link, ines: fixed_cost, tulipa: [[flow_commission, fixed_cost]]}
+  - {role: link, ines: operational_cost, tulipa: [[flow_milestone, operational_cost]]}
+
+  - {role: system, ines: discount_rate, tulipa: [[model_parameters, discount_rate]]}
+
+# Value lists
+startup_method_to_unit_commitment:
+  no_startup: none
+  linear: basic
+  integer: basic
+  trajectory: basic
+  linear_with_tiers: basic
+  integer_with_tiers: basic
+  trajectory_with_tiers: basic
+
+sense:
+  equal: "=="
+  greater_than: ">="
+  less_than: "<="
+
+# Explanations used in the conversion reports for parameters that are not transformed.
+not_transformed_reasons:
+  ines:
+    unit.startup_cost: Tulipa has no start-up cost.
+    unit.shutdown_cost: Tulipa has no shut-down cost.
+    unit.startup_co2_emission: Tulipa has no emission accounting.
+    unit.fixed_co2_emissions: Tulipa has no emission accounting.
+    unit.investment_co2_emissions: Tulipa has no emission accounting.
+    unit.units_fix_cumulative: Tulipa has no fixed cumulative unit count (only min/max available units).
+    unit.units_invest_fix_period: Tulipa cannot fix investments.
+    unit.units_retire_period: Tulipa has no scheduled retirements.
+    unit.cooling_time_to_tiers: Tulipa has no start-up tiers.
+    unit.startup_cost_tiers: Tulipa has no start-up tiers.
+    unit.constraint_online_coefficient: User constraints are not supported by Tulipa.
+    unit.constraint_unit_count_coefficient: User constraints are not supported by Tulipa.
+    unit_flow.salvage_value: Tulipa computes the salvage value internally.
+    unit_flow.profile_fix: Tulipa cannot fix a flow to a profile.
+    unit_flow.profile_limit_lower: Tulipa has no lower flow profile.
+    unit_flow.ramp_cost: Tulipa has no ramping cost.
+    unit_flow.inertia_constant: Tulipa has no inertia constraints.
+    unit_flow.is_non_synchronous: Tulipa has no non-synchronous constraints.
+    unit_flow.nox_emission_rate: Tulipa has no emission accounting.
+    unit_flow.so2_emission_rate: Tulipa has no emission accounting.
+    unit_flow.flow_max_cumulative: Tulipa limits energy per asset only with inter-period constraints (not mapped).
+    unit_flow.flow_min_cumulative: Tulipa limits energy per asset only with inter-period constraints (not mapped).
+    unit_flow.constraint_flow_coefficient: User constraints are not supported by Tulipa.
+    node.co2_content: Tulipa has no emission accounting (model emissions as an explicit flow instead).
+    node.commodity_limit: Not mapped (would need inter-period energy limits in Tulipa).
+    node.commodity_price_ladder: Tulipa has no price ladders.
+    node.spill_lower_limit: Tulipa has no spill variable.
+    node.spill_upper_limit: Tulipa has no spill variable.
+    node.storage_cost_of_stored_energy: Tulipa has no storage holding cost.
+    node.storage_loss_absolute: Tulipa only has a relative storage loss.
+    node.storage_loss_from_storage_capacity: Tulipa only has a loss relative to the stored energy.
+    node.storage_salvage_value: Tulipa computes the salvage value internally.
+    node.storage_state_value: Tulipa has no storage value.
+    node.storage_state_value_method: Tulipa has no storage value.
+    node.storage_state_binding_method: Tulipa always cycles the storage within the (representative) period.
+    node.storages_fix_cumulative: Tulipa cannot fix cumulative storage units.
+    node.storages_invest_fix_period: Tulipa cannot fix investments.
+    node.storages_retire_period: Tulipa has no scheduled retirements.
+    node.storages_max_cumulative: Tulipa min/max available units apply to power units, not storage energy units.
+    node.storages_min_cumulative: Tulipa min/max available units apply to power units, not storage energy units.
+    node.storage_fixed_co2_emissions: Tulipa has no emission accounting.
+    node.storage_investment_co2_emissions: Tulipa has no emission accounting.
+    node.constraint_storage_count_coefficient: User constraints are not supported by Tulipa.
+    node.constraint_storage_state_coefficient: User constraints are not supported by Tulipa.
+    link.efficiency: Tulipa transport flows are lossless.
+    node__link__node.efficiency: Tulipa transport flows are lossless.
+    node__link__node.efficiency: Tulipa transport flows are lossless.
+    link.salvage_value: Tulipa computes the salvage value internally.
+    link.is_non_synchronous: Tulipa has no non-synchronous constraints.
+    link.flow_max_cumulative: Not supported for transport flows in Tulipa.
+    link.flow_min_cumulative: Not supported for transport flows in Tulipa.
+    link.links_fix_cumulative: Tulipa cannot fix cumulative units.
+    link.links_invest_fix_period: Tulipa cannot fix investments.
+    link.links_retire_period: Tulipa has no scheduled retirements.
+    link.links_max_cumulative: Tulipa has no available-unit limits for flows.
+    link.links_min_cumulative: Tulipa has no available-unit limits for flows.
+    link.fixed_co2_emissions: Tulipa has no emission accounting.
+    link.investment_co2_emissions: Tulipa has no emission accounting.
+    link.constraint_link_count_coefficient: User constraints are not supported by Tulipa.
+    node__link__node.ramp_cost: Tulipa has no ramping for transport flows.
+    node__link__node.ramp_limit_up: Tulipa has no ramping for transport flows.
+    node__link__node.ramp_limit_down: Tulipa has no ramping for transport flows.
+    node__link__node.ramp_method: Tulipa has no ramping for transport flows.
+    node__link__node.constraint_flow_coefficient: User constraints are not supported by Tulipa.
+    node__node.diffusion_coefficient: Tulipa has no diffusion between nodes.
+    node__node.junction_type: Tulipa has no diffusion between nodes.
+    constraint.constant: User constraints are not supported by Tulipa.
+    constraint.sense: User constraints are not supported by Tulipa.
+    reserve: Tulipa has no reserves.
+    node__reserve: Tulipa has no reserves.
+    unit__node__reserve: Tulipa has no reserves.
+    link__node__reserve: Tulipa has no reserves.
+    set__reserve: Tulipa has no reserves.
+    solve_pattern.time_resolution_scope: Set based time resolution (Tulipa partitions) is not mapped.
+    set.co2_max_cumulative: Tulipa has no emission accounting.
+    set.co2_max_period: Tulipa has no emission accounting.
+    set.co2_price: Tulipa has no emission accounting.
+    set.capacity_margin: Tulipa has no capacity margin constraint.
+    set.inertia_limit: Tulipa has no inertia constraints.
+    set.non_synchronous_limit: Tulipa has no non-synchronous constraints.
+    set.invest_max_total: Tulipa group limits are per milestone year (use invest_max_period).
+    set.invest_min_total: Tulipa group limits are per milestone year (use invest_min_period).
+    set.flow_max_instant: Tulipa has no instantaneous group flow limits.
+    set.flow_min_instant: Tulipa has no instantaneous group flow limits.
+    set.flow_max_cumulative: Tulipa has no cumulative group flow limits.
+    set.flow_min_cumulative: Tulipa has no cumulative group flow limits.
+    set.time_resolution: Set based time resolution (Tulipa partitions) is not mapped.
+    set.stochastic_method: INES stochastics are not mapped to Tulipa scenarios.
+    set.stochastic_forecast_weights: INES stochastics are not mapped to Tulipa scenarios.
+    solve_pattern.rolling_horizon: Tulipa rolling horizon is configured at run time, not in the input data.
+    solve_pattern.rolling_jump: Tulipa rolling horizon is configured at run time, not in the input data.
+    solve_pattern.solve_mode: Tulipa rolling horizon is configured at run time, not in the input data.
+    solve_pattern.stochastic_scope: INES stochastics are not mapped to Tulipa scenarios.
+    solve_pattern.includes_solve_pattern: Nested solves are not supported by Tulipa.
+    period.years_represented: Tulipa derives the years represented from the milestone years.
+  tulipa:
+    asset.vintage_method: INES has no vintage methods.
+    asset.use_inter_period_constraints: INES has no representative periods.
+    asset.inter_period_storage_level_bounds: INES has no representative periods.
+    asset.energy_to_power_ratio: INES expresses it as a constraint between a storage and its link; needs a link to a node and non-zero capacities.
+    asset_milestone.min_energy_timeframe_partition: INES has no inter-period energy limits.
+    asset_milestone.max_energy_timeframe_partition: INES has no inter-period energy limits.
+    flow.carrier: INES has no carrier attribute.
+    flow_commission.storage_coefficient: INES has no storage coefficient on flows.
+    flow_commission.capacity_coefficient: Flow between two nodes became an INES link, links have no capacity coefficient.
+    flow_commission.conversion_coefficient: Flow between two nodes became an INES link, links have no conversion coefficient.
+    profiles_rep_periods.value: Profile is not used for any milestone year (e.g. a vintage profile of a commission year that is not a milestone year).
+    flow_commission.producer_efficiency: Only used together with commodity_price (otherwise has no effect in Tulipa).
+    flow_milestone.reactance: INES has no reactance parameter.
+    flow_milestone.dc_opf: INES DC load flow is defined with set.network_type which has no reactance.
+    model_parameters.discount_year: INES discounts to the first period.
+    model_parameters.power_system_base: INES has no power system base.
+    model_parameters.risk_aversion_weight_lambda: INES has no CVaR objective.
+    model_parameters.risk_aversion_confidence_level_alpha: INES has no CVaR objective.
+    stochastic_scenario: INES stochastic structure is different (forecasts), not mapped.
+    rep_periods_mapping: INES has no representative periods; the rep periods are written as consecutive time.
+    assets_rep_periods_partitions: INES has no flexible temporal resolution per asset.
+    flows_rep_periods_partitions: INES has no flexible temporal resolution per flow.
+    assets_timeframe_partitions: INES has no inter-period partitions.
+    assets_timeframe_profiles: INES has no inter-period profiles.
+    profiles_timeframe: INES has no inter-period profiles.

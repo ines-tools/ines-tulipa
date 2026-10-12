@@ -1,0 +1,20 @@
+# Settings for ines_to_tulipa.py and tulipa_to_ines.py
+
+# Capacity [MW] given to Tulipa assets that INES does not limit (commodity sources,
+# storages without a link, penalty/slack assets). Tulipa needs a capacity for every asset.
+unlimited_capacity: 1.0e6
+
+# Name of the INES alternative and scenario written by tulipa_to_ines.py
+ines_alternative: Base
+ines_scenario: base
+
+# Names of the INES entities created by tulipa_to_ines.py
+ines_solve_pattern: solve
+ines_system: system
+
+# Suffixes used for Tulipa assets that represent INES node penalties (both directions)
+penalty_upward_suffix: _penalty_upward
+penalty_downward_suffix: _penalty_downward
+
+# Suffix of the INES commodity node created for a Tulipa producer that has a commodity_price
+commodity_suffix: _commodity
