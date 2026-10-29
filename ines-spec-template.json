@@ -692,10 +692,26 @@
         ],
         [
             "link",
+            "commission_date",
+            null,
+            null,
+            "The date of commission. The investment costs will not count to this ie. delayed existing link",
+            null
+        ],
+        [
+            "link",
             "constraint_link_count_coefficient",
             null,
             null,
             "[p.u.] Multiplier between constraints and the number of the links. Map of constraints and respective coefficients.",
+            null
+        ],
+        [
+            "link",
+            "decommission_date",
+            null,
+            null,
+            "The date of forced decommission.",
             null
         ],
         [
@@ -900,6 +916,14 @@
         ],
         [
             "link",
+            "time_resolution",
+            null,
+            null,
+            "Resolution of the link if differing from the model resolution. Duration or Array of Durations, if not constant resolution",
+            null
+        ],
+        [
+            "link",
             "transfer_method",
             null,
             "link_transfer_method",
@@ -984,6 +1008,14 @@
             null,
             null,
             "[\u20ac/MWh and MWh] Array of maps with an increasing price and a quantity at that price.",
+            null
+        ],
+        [
+            "node",
+            "constraint_demand_coefficient",
+            null,
+            null,
+            "[p.u.] Multiplier between constraints and demand of the node. Map of constraints and respective coefficients.",
             null
         ],
         [
@@ -1084,10 +1116,26 @@
         ],
         [
             "node",
+            "storage_commission_date",
+            null,
+            null,
+            "The date of commission. The investment costs will not count to this ie. delayed existing unit",
+            null
+        ],
+        [
+            "node",
             "storage_cost_of_stored_energy",
             null,
             null,
             "[CUR/MWh/h] Cost of storing energy over time. Constant or map of periods.",
+            null
+        ],
+        [
+            "node",
+            "storage_decommission_date",
+            null,
+            null,
+            "The date of forced decommission.",
             null
         ],
         [
@@ -1387,11 +1435,27 @@
             null
         ],
         [
+            "node",
+            "time_resolution",
+            null,
+            null,
+            "Resolution of the node if differing from the model resolution. Duration or Array of Durations, if not constant resolution",
+            null
+        ],
+        [
             "node__link__node",
             "capacity",
             null,
             null,
             "[MW] Capacity in left-to-right direction for one transfer link. Replaces link capacity in that direction. Constant.",
+            null
+        ],
+        [
+            "node__link__node",
+            "carrier",
+            null,
+            null,
+            "The type of the energy flow. AC, DC, heat ect.",
             null
         ],
         [
@@ -1532,6 +1596,22 @@
         ],
         [
             "node__to_unit",
+            "capacity_coefficient",
+            null,
+            null,
+            "[p.u] Multiplier between the flow and the combined_capacity constraint. Constant",
+            null
+        ],
+        [
+            "node__to_unit",
+            "carrier",
+            null,
+            null,
+            "The type of the energy flow. AC, DC, heat ect.",
+            null
+        ],
+        [
+            "node__to_unit",
             "constraint_flow_coefficient",
             null,
             null,
@@ -1644,6 +1724,14 @@
         ],
         [
             "node__to_unit",
+            "profile_limit_lower_representative_period",
+            null,
+            null,
+            "[p.u.] Minimum flow limit. Representative periods format. 2D Map: 1. Representative period, 2. Timestep, 3. Value  ",
+            null
+        ],
+        [
+            "node__to_unit",
             "profile_limit_upper",
             null,
             null,
@@ -1656,6 +1744,14 @@
             null,
             null,
             "[p.u.] Maximum flow limit forecasts either through forecast time series (1st dimension forecast name, 2nd dimension time series) or updating forecasts (1st dimension forecast name, 2nd dimension analysis time, 3rd time series).",
+            null
+        ],
+        [
+            "node__to_unit",
+            "profile_limit_upper_representative_period",
+            null,
+            null,
+            "[p.u.] Maximum flow limit. Representative periods format. 2D Map: 1. Representative period, 2. Timestep, 3. Value  ",
             null
         ],
         [
@@ -1712,6 +1808,14 @@
             null,
             null,
             "[kg of SO2 emissions/MWh] SO2 emission rate per MWh of flow. Constant.",
+            null
+        ],
+        [
+            "node__to_unit",
+            "time_resolution",
+            null,
+            null,
+            "Resolution of the flow if differing from the model and unit resolution. Duration or Array of Durations, if not constant resolution",
             null
         ],
         [
@@ -1983,7 +2087,7 @@
             "time_resolution",
             null,
             null,
-            "Which time resolution the set will propagate to the set members (node, node__unit, link) overriding time_resolution from the solve_pattern.",
+            "Which time resolution the set will propagate to the set members (node, node__unit, link) overriding time_resolution from the solve_pattern. Duration or Array of Durations, if not constant resolution",
             null
         ],
         [
@@ -2068,6 +2172,14 @@
         ],
         [
             "solve_pattern",
+            "representative_period_mapping",
+            null,
+            null,
+            "Map on how the representative periods are used by the periods. 2D-map: 1. Period, 2. Representative period 3. Weight ",
+            null
+        ],
+        [
+            "solve_pattern",
             "rolling_horizon",
             null,
             null,
@@ -2100,6 +2212,14 @@
         ],
         [
             "solve_pattern",
+            "stochastic_representative_period_mapping",
+            null,
+            null,
+            "Map on how the representative periods are used by the stochastic branches. 3D Map: 1. Period 2. Stochastic branch 3. Representative period 4. Weight",
+            null
+        ],
+        [
+            "solve_pattern",
             "stochastic_scope",
             "none",
             "stochastic_scope",
@@ -2111,7 +2231,7 @@
             "time_resolution",
             null,
             null,
-            "[duration] Time resolution of the model (unless re-defined by a time resolution of a set).",
+            "[duration] Time resolution of the model (unless re-defined by a time resolution of a set). Duration or Array of Durations, if not constant resolution",
             null
         ],
         [
@@ -2128,6 +2248,14 @@
             null,
             null,
             "[ratio] e.g. 0.05 is 5%. Discount rate for the value of future compared to today. Constant or map of periods.",
+            null
+        ],
+        [
+            "system",
+            "discount_year",
+            null,
+            null,
+            "The year to which all cost are discounted. Default is the model starting year.",
             null
         ],
         [
@@ -2228,6 +2356,22 @@
         ],
         [
             "unit",
+            "combined_capacity",
+            null,
+            null,
+            "[MW] Combined capacity for one unit with multiple outputs. (is therefore multiplied by number of existing plus invested units). Constant.",
+            null
+        ],
+        [
+            "unit",
+            "commission_date",
+            null,
+            null,
+            "The date of commission. The investment costs will not count to this ie. delayed existing unit",
+            null
+        ],
+        [
+            "unit",
             "constraint_online_coefficient",
             null,
             null,
@@ -2256,6 +2400,14 @@
             null,
             null,
             "[minutes] Time to cool to the startup tier from shutdown.",
+            null
+        ],
+        [
+            "unit",
+            "decommission_date",
+            null,
+            null,
+            "The date of forced decommission.",
             null
         ],
         [
@@ -2404,6 +2556,14 @@
         ],
         [
             "unit",
+            "time_resolution",
+            null,
+            null,
+            "Resolution of the unit if differing from the model resolution. Duration or Array of Durations, if not constant resolution",
+            null
+        ],
+        [
+            "unit",
             "units_existing",
             null,
             null,
@@ -2532,6 +2692,22 @@
         ],
         [
             "unit__to_node",
+            "capacity_coefficient",
+            null,
+            null,
+            "[p.u] Multiplier between the flow and the combined_capacity constraint. Constant",
+            null
+        ],
+        [
+            "unit__to_node",
+            "carrier",
+            null,
+            null,
+            "The type of the energy flow. AC, DC, heat ect.",
+            null
+        ],
+        [
+            "unit__to_node",
             "constraint_flow_coefficient",
             null,
             null,
@@ -2644,6 +2820,14 @@
         ],
         [
             "unit__to_node",
+            "profile_limit_lower_representative_period",
+            null,
+            null,
+            "[p.u.] Minimum flow limit. Representative periods format. 2D Map: 1. Representative period, 2. Timestep, 3. Value  ",
+            null
+        ],
+        [
+            "unit__to_node",
             "profile_limit_upper",
             null,
             null,
@@ -2656,6 +2840,14 @@
             null,
             null,
             "[p.u.] Maximum flow limit forecasts either through forecast time series (1st dimension forecast name, 2nd dimension time series) or updating forecasts (1st dimension forecast name, 2nd dimension analysis time, 3rd time series).",
+            null
+        ],
+        [
+            "unit__to_node",
+            "profile_limit_upper_representative_period",
+            null,
+            null,
+            "[p.u.] Maximum flow limit. Representative periods format. 2D Map: 1. Representative period, 2. Timestep, 3. Value  ",
             null
         ],
         [
@@ -2712,6 +2904,14 @@
             null,
             null,
             "[kg of SO2 emissions/MWh] SO2 emission rate per MWh of flow. Constant.",
+            null
+        ],
+        [
+            "unit__to_node",
+            "time_resolution",
+            null,
+            null,
+            "Resolution of the flow if differing from the model and unit resolution. Duration or Array of Durations, if not constant resolution",
             null
         ],
         [
@@ -3053,6 +3253,12 @@
             1
         ],
         [
+            "link",
+            "time_resolution",
+            "duration",
+            0
+        ],
+        [
             "link__node__reserve",
             "max_reserve_provision",
             "float",
@@ -3145,6 +3351,12 @@
         [
             "node",
             "commodity_price_ladder",
+            "map",
+            1
+        ],
+        [
+            "node",
+            "constraint_demand_coefficient",
             "map",
             1
         ],
@@ -3611,6 +3823,12 @@
             1
         ],
         [
+            "node",
+            "time_resolution",
+            "duration",
+            0
+        ],
+        [
             "node__link__node",
             "capacity",
             "float",
@@ -3757,6 +3975,12 @@
         [
             "node__to_unit",
             "capacity",
+            "float",
+            0
+        ],
+        [
+            "node__to_unit",
+            "capacity_coefficient",
             "float",
             0
         ],
@@ -3912,6 +4136,12 @@
         ],
         [
             "node__to_unit",
+            "profile_limit_lower_representative_period",
+            "map",
+            2
+        ],
+        [
+            "node__to_unit",
             "profile_limit_upper",
             "float",
             0
@@ -3937,6 +4167,12 @@
         [
             "node__to_unit",
             "profile_limit_upper_forecasts",
+            "map",
+            2
+        ],
+        [
+            "node__to_unit",
+            "profile_limit_upper_representative_period",
             "map",
             2
         ],
@@ -3980,6 +4216,12 @@
             "node__to_unit",
             "so2_emission_rate",
             "float",
+            0
+        ],
+        [
+            "node__to_unit",
+            "time_resolution",
+            "duration",
             0
         ],
         [
@@ -4368,6 +4610,12 @@
         ],
         [
             "solve_pattern",
+            "representative_period_mapping",
+            "map",
+            2
+        ],
+        [
+            "solve_pattern",
             "rolling_horizon",
             "duration",
             0
@@ -4392,6 +4640,12 @@
         ],
         [
             "solve_pattern",
+            "stochastic_representative_period_mapping",
+            "map",
+            3
+        ],
+        [
+            "solve_pattern",
             "time_resolution",
             "duration",
             0
@@ -4407,6 +4661,12 @@
             "discount_rate",
             "map",
             1
+        ],
+        [
+            "system",
+            "discount_year",
+            "float",
+            0
         ],
         [
             "system",
@@ -4443,6 +4703,12 @@
             "availability_forecasts",
             "map",
             2
+        ],
+        [
+            "unit",
+            "combined_capacity",
+            "float",
+            0
         ],
         [
             "unit",
@@ -4602,6 +4868,12 @@
         ],
         [
             "unit",
+            "time_resolution",
+            "duration",
+            0
+        ],
+        [
+            "unit",
             "units_existing",
             "float",
             0
@@ -4711,6 +4983,12 @@
         [
             "unit__to_node",
             "capacity",
+            "float",
+            0
+        ],
+        [
+            "unit__to_node",
+            "capacity_coefficient",
             "float",
             0
         ],
@@ -4866,6 +5144,12 @@
         ],
         [
             "unit__to_node",
+            "profile_limit_lower_representative_period",
+            "map",
+            2
+        ],
+        [
+            "unit__to_node",
             "profile_limit_upper",
             "float",
             0
@@ -4891,6 +5175,12 @@
         [
             "unit__to_node",
             "profile_limit_upper_forecasts",
+            "map",
+            2
+        ],
+        [
+            "unit__to_node",
+            "profile_limit_upper_representative_period",
             "map",
             2
         ],
@@ -4934,6 +5224,12 @@
             "unit__to_node",
             "so2_emission_rate",
             "float",
+            0
+        ],
+        [
+            "unit__to_node",
+            "time_resolution",
+            "duration",
             0
         ],
         [

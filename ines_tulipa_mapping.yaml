@@ -38,6 +38,7 @@ direct_parameters:
 
   - {role: unit_flow, ines: other_operational_cost, tulipa: [[flow_milestone, operational_cost]]}
   - {role: unit_flow, ines: conversion_coefficient, tulipa: [[flow_commission, conversion_coefficient]]}
+  - {role: unit_flow, ines: carrier, tulipa: [[flow, carrier]]}
 
   - {role: storage, ines: storage_capacity, tulipa: [[asset, capacity_storage_energy]]}
   - {role: storage, ines: storage_lifetime, tulipa: [[asset, technical_lifetime], [asset, economic_lifetime]]}
@@ -88,6 +89,8 @@ not_transformed_reasons:
     unit.constraint_online_coefficient: User constraints are not supported by Tulipa.
     unit.constraint_unit_count_coefficient: User constraints are not supported by Tulipa.
     unit_flow.salvage_value: Tulipa computes the salvage value internally.
+    unit_flow.carrier: Input from a commodity node that became a commodity_price has no Tulipa flow.
+    unit_flow.time_resolution: Input from a commodity node that became a commodity_price has no Tulipa flow.
     unit_flow.profile_fix: Tulipa cannot fix a flow to a profile.
     unit_flow.profile_limit_lower: Tulipa has no lower flow profile.
     unit_flow.ramp_cost: Tulipa has no ramping cost.
@@ -172,12 +175,12 @@ not_transformed_reasons:
     period.years_represented: Tulipa derives the years represented from the milestone years.
   tulipa:
     asset.vintage_method: INES has no vintage methods.
-    asset.use_inter_period_constraints: INES has no representative periods.
+    asset.use_inter_period_constraints: INES -> Tulipa links storages across representative periods by default.
     asset.inter_period_storage_level_bounds: INES has no representative periods.
     asset.energy_to_power_ratio: INES expresses it as a constraint between a storage and its link; needs a link to a node and non-zero capacities.
     asset_milestone.min_energy_timeframe_partition: INES has no inter-period energy limits.
     asset_milestone.max_energy_timeframe_partition: INES has no inter-period energy limits.
-    flow.carrier: INES has no carrier attribute.
+    flow.carrier: Flow without an INES counterpart (e.g. a penalty slack flow).
     flow_commission.storage_coefficient: INES has no storage coefficient on flows.
     flow_commission.capacity_coefficient: Flow between two nodes became an INES link, links have no capacity coefficient.
     flow_commission.conversion_coefficient: Flow between two nodes became an INES link, links have no conversion coefficient.
@@ -185,14 +188,13 @@ not_transformed_reasons:
     flow_commission.producer_efficiency: Only used together with commodity_price (otherwise has no effect in Tulipa).
     flow_milestone.reactance: INES has no reactance parameter.
     flow_milestone.dc_opf: INES DC load flow is defined with set.network_type which has no reactance.
-    model_parameters.discount_year: INES discounts to the first period.
     model_parameters.power_system_base: INES has no power system base.
     model_parameters.risk_aversion_weight_lambda: INES has no CVaR objective.
     model_parameters.risk_aversion_confidence_level_alpha: INES has no CVaR objective.
     stochastic_scenario: INES stochastic structure is different (forecasts), not mapped.
     rep_periods_mapping: INES has no representative periods; the rep periods are written as consecutive time.
-    assets_rep_periods_partitions: INES has no flexible temporal resolution per asset.
-    flows_rep_periods_partitions: INES has no flexible temporal resolution per flow.
+    assets_rep_periods_partitions: Only partitions that are equal for all periods map to INES time_resolution.
+    flows_rep_periods_partitions: Only partitions that are equal for all periods map to INES time_resolution (link, unit flow).
     assets_timeframe_partitions: INES has no inter-period partitions.
     assets_timeframe_profiles: INES has no inter-period profiles.
     profiles_timeframe: INES has no inter-period profiles.

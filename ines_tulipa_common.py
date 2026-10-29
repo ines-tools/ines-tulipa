@@ -336,10 +336,10 @@ def write_ines(target, entities, values, alternative="Base", scenario="base"):
     is_json = target.lower().endswith(".json")
     url = "sqlite://" if is_json else ines_url(target)
     with DatabaseMapping(url, create=True) as db:
-        if not db.get_entity_class_items():
-            _, errors = import_data(db, **_prepare_import(template))
-            if errors:
-                raise RuntimeError(f"Errors importing INES template: {errors[:5]}")
+        # merging also adds definitions missing from a database made with an older spec
+        _, errors = import_data(db, **_prepare_import(template))
+        if errors:
+            raise RuntimeError(f"Errors importing INES template: {errors[:5]}")
         db.purge_items("parameter_value")
         db.purge_items("entity")
         db.purge_items("alternative")
@@ -459,6 +459,36 @@ def per_year_value(year_values, periods_by_year):
 
 def is_number(v):
     return isinstance(v, (int, float, np.integer, np.floating)) and not isinstance(v, bool)
+
+
+def partition_blocks(spec, partition):
+    """Block lengths in timesteps of a Tulipa partition (uniform gives one block length), None if invalid."""
+    part = str(partition).strip()
+    try:
+        if spec == "uniform":
+            return [int(part)]
+        if spec == "explicit":
+            return [int(x) for x in part.split(";")]
+        if spec == "math":
+            out = []
+            for atom in part.split("+"):
+                repeats, length = atom.split("x")
+                out += [int(length)] * int(repeats)
+            return out
+    except ValueError:
+        return None
+    return None
+
+
+def blocks_to_math(blocks):
+    """Tulipa 'math' partition, e.g. [4, 4, 6, 6, 6] -> '2x4+3x6'."""
+    atoms = []
+    for b in blocks:
+        if atoms and atoms[-1][1] == b:
+            atoms[-1][0] += 1
+        else:
+            atoms.append([1, b])
+    return "+".join(f"{r}x{d}" for r, d in atoms)
 
 
 def ceil_int(v):

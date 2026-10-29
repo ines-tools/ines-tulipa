@@ -23,6 +23,7 @@ from ines_tulipa_common import (
     load_mapping,
     load_settings,
     load_tulipa_schema,
+    partition_blocks,
     per_year_value,
     read_tulipa,
     write_ines,
@@ -118,6 +119,8 @@ class TulipaToInes:
         self.entities = {}
         self.values = {}
         self.main_entity = {}
+        self.flow_k = {}
+        self.side_units = set()
 
     # ------------------------------------------------------------ output helpers
     def ent(self, cls, *byname):
@@ -144,27 +147,35 @@ class TulipaToInes:
         self.years = years
         self.period_name = {y: str(y) for y in years}
         self.stamp = {}
+        self.rep_steps = {}
+        self.rep_name = {}
         resolutions = set()
         all_stamps = []
         for y in years:
             t0 = pd.Timestamp(year=y, month=1, day=1)
             offset = 0.0
+            rep_hours = []
             for k in sorted(reps.get(y, [1])):
                 n = int(d.get("rep_periods_data", (y, k), "num_timesteps"))
                 res = float(d.get("rep_periods_data", (y, k), "resolution"))
                 resolutions.add(res)
+                self.rep_steps[(y, k)] = n
                 for t in range(1, n + 1):
                     ts = t0 + pd.Timedelta(hours=offset + (t - 1) * res)
                     self.stamp[(y, k, t)] = ts
                     all_stamps.append(ts)
                 offset += n * res
+                rep_hours.append(n * res)
             p = self.ent("period", self.period_name[y])
             self.put(p, "start_time", DateTime(t0.to_pydatetime()))
-            self.put(p, "duration", Duration(f"{int(round(offset))}h"))
+            if len(rep_hours) > 1:
+                self.put(p, "duration", Array([Duration(_hours_str(h)) for h in rep_hours]))
+            else:
+                self.put(p, "duration", Duration(f"{int(round(offset))}h"))
             i = years.index(y)
             self.put(p, "years_represented", float(years[i + 1] - y) if i + 1 < len(years) else 1.0)
             if len(reps.get(y, [])) > 1:
-                self.report.note(f"Milestone year {y}: {len(reps[y])} representative periods are written one after another in the INES timeline (their weights are not represented).")
+                self.report.note(f"Milestone year {y}: {len(reps[y])} representative periods are written one after another in the INES timeline (period.duration as an array).")
         self.res = sorted(resolutions)[0] if resolutions else 1.0
         if len(resolutions) > 1:
             self.report.note(f"Representative periods use several resolutions {sorted(resolutions)}; INES time_resolution set to {self.res} h.")
@@ -176,23 +187,58 @@ class TulipaToInes:
             [s.to_pydatetime() for s in all_stamps], [1.0] * len(all_stamps), False, False))
         self.all_stamps = all_stamps
 
-        simple = True
+        totals = defaultdict(float)
         for key in d.keys("rep_periods_mapping"):
             y, period, k, scen = key
-            w = d.get("rep_periods_mapping", key, "weight")
-            n_period = d.get("timeframe_data", (y, period), "num_timesteps")
-            n_rep = d.get("rep_periods_data", (y, k), "num_timesteps")
-            if len(reps.get(y, [])) == 1 and w == 1 and n_period == n_rep and scen == 1:
-                continue
-            simple = False
+            totals[(y, k, scen)] += float(d.get("rep_periods_mapping", key, "weight") or 0.0)
+        simple = all(abs(w - 1) < 1e-12 and s == 1 and len(reps.get(y, [])) == 1 for (y, k, s), w in totals.items())
         if simple:
             for key in d.keys("rep_periods_mapping"):
                 d.mark("rep_periods_mapping", key, "weight")
+        else:
+            self._rep_period_mapping(sp, reps)
         for key in d.keys("timeframe_data"):
             d.mark("timeframe_data", key, "num_timesteps")
         for key in d.keys("rep_periods_data"):
             d.mark("rep_periods_data", key, "num_timesteps")
             d.mark("rep_periods_data", key, "resolution")
+
+    def _rep_period_mapping(self, sp, reps):
+        """Total weight of each representative period per period (and stochastic scenario) as an INES mapping."""
+        d = self.d
+        weights = defaultdict(float)
+        for key in d.keys("rep_periods_mapping"):
+            y, _, k, scen = key
+            weights[(y, scen, k)] += float(d.get("rep_periods_mapping", key, "weight") or 0.0)
+        for y in self.years:
+            for k in sorted(reps.get(y, [])):
+                self.rep_name[(y, k)] = f"{self.period_name[y]}_rp{k}"
+        scens = sorted({s for _, s, _ in weights})
+
+        def rep_map(y, s):
+            ks = [k for k in sorted(reps.get(y, [])) if (y, s, k) in weights]
+            return Map([self.rep_name[(y, k)] for k in ks], [weights[(y, s, k)] for k in ks], index_name="representative_period")
+
+        periods = [self.period_name[y] for y in self.years]
+        if len(scens) == 1:
+            self.put(sp, "representative_period_mapping", Map(periods, [rep_map(y, scens[0]) for y in self.years], index_name="period"))
+        else:
+            self.put(sp, "stochastic_representative_period_mapping", Map(periods, [
+                Map([str(s) for s in scens], [rep_map(y, s) for s in scens], index_name="stochastic_branch") for y in self.years
+            ], index_name="period"))
+        self.report.note("Representative period weights summed over the Tulipa timeframe periods (the order of the periods, "
+                         "used by inter-period constraints, is not represented).")
+
+    def rep_profile_map(self, names_by_year):
+        """INES 2D map representative period -> timestep -> value from Tulipa profiles of each milestone year."""
+        reps, values = [], []
+        for (y, k), rep in sorted(self.rep_name.items()):
+            name = names_by_year.get(y)
+            n = self.rep_steps[(y, k)]
+            vals = [self.d.get("profiles_rep_periods", (name, y, k, t), "value", default=1.0) for t in range(1, n + 1)] if name else [1.0] * n
+            reps.append(rep)
+            values.append(Map([str(t) for t in range(1, n + 1)], [float(v) for v in vals], index_name="timestep"))
+        return Map(reps, values, index_name="representative_period")
 
     def _profile_values(self, name, y):
         """Values of a profile for a milestone year in timeline order (None if missing)."""
@@ -240,6 +286,157 @@ class TulipaToInes:
                 out[k[2]] = self.d.get("flows_profiles", k, "profile_name")
         return out
 
+    # ------------------------------------------------------------ vintages
+    def split_vintages(self):
+        """Compact vintage units become one aggregated asset per commission year, named <asset>_<year>."""
+        R = self.d.rows
+        asset_cols = ("asset", "from_asset", "to_asset", "flow_1_from_asset", "flow_1_to_asset", "flow_2_from_asset", "flow_2_to_asset")
+
+        def pick(by_year, c):
+            """Row of commission year c, else of the latest earlier year, else of the first year."""
+            if not by_year:
+                return None
+            earlier = [y for y in by_year if y <= c]
+            return by_year[c] if c in by_year else by_year[max(earlier) if earlier else min(by_year)]
+
+        for (a,), rec in list(R["asset"].items()):
+            if rec.get("vintage_method") in (None, "aggregated") or rec.get("type") not in UNIT_TYPES:
+                continue
+            both = {k: r for k, r in R["asset_both"].items() if k[0] == a}
+            comm = {k[1]: r for k, r in R["asset_commission"].items() if k[0] == a}
+            vintages = []
+            for c in sorted({k[2] for k in both} | set(comm)):
+                existing = any((r.get("initial_units") or 0) > 0 for k, r in both.items() if k[2] == c)
+                investable = c in self.years and bool((R["asset_milestone"].get((a, c)) or {}).get("investable"))
+                if existing or investable:
+                    vintages.append(c)
+            if not vintages:
+                continue
+            for f, t in [k for k in R["flow"] if a in k and R["flow"][k].get("is_transport")]:
+                self._shared_connection(a, f, t)
+            flows = [k for k in R["flow"] if a in k]
+            profiles = defaultdict(dict)
+            for (pa, py, pt), r in R["assets_profiles"].items():
+                if pa == a:
+                    profiles[pt][py] = r
+            for c in vintages:
+                n = f"{a}_{c}"
+
+                def ren(x):
+                    return n if x == a else x
+
+                R["asset"][(n,)] = {**rec, "asset": n, "vintage_method": "aggregated"}
+                for y in self.years:
+                    m = R["asset_milestone"].get((a, y))
+                    if m:
+                        R["asset_milestone"][(n, y)] = {**m, "asset": n, "investable": bool(m.get("investable")) and y == c}
+                    src = pick(comm, c)
+                    if src:
+                        R["asset_commission"][(n, y)] = {**src, "asset": n, "commission_year": y}
+                    b = both.get((a, y, c)) or {}
+                    R["asset_both"][(n, y, y)] = {**b, "asset": n, "milestone_year": y, "commission_year": y,
+                                                 "initial_units": b.get("initial_units") or 0.0}
+                    for pt, by_year in profiles.items():
+                        R["assets_profiles"][(n, y, pt)] = {**pick(by_year, c), "asset": n, "commission_year": y}
+                for table in ("assets_rep_periods_partitions", "assets_timeframe_partitions", "assets_timeframe_profiles"):
+                    for k, r in list(R[table].items()):
+                        if k[0] == a:
+                            R[table][(n,) + k[1:]] = {**r, "asset": n}
+                for f, t in flows:
+                    nf, nt = ren(f), ren(t)
+                    R["flow"][(nf, nt)] = {**R["flow"][(f, t)], "from_asset": nf, "to_asset": nt}
+                    fc = {k[2]: r for k, r in R["flow_commission"].items() if k[:2] == (f, t)}
+                    for y in self.years:
+                        src = pick(fc, c)
+                        if src:
+                            R["flow_commission"][(nf, nt, y)] = {**src, "from_asset": nf, "to_asset": nt, "commission_year": y}
+                        fb = R["flow_both"].get((f, t, y, c))
+                        if fb:
+                            R["flow_both"][(nf, nt, y, y)] = {**fb, "from_asset": nf, "to_asset": nt, "commission_year": y}
+                    for table in ("flow_milestone", "flows_profiles", "flows_rep_periods_partitions"):
+                        for k, r in list(R[table].items()):
+                            if k[:2] == (f, t):
+                                R[table][(nf, nt) + k[2:]] = {**r, "from_asset": nf, "to_asset": nt}
+                for k, r in list(R["flows_relationships"].items()):
+                    if a in k[:4]:
+                        nk = tuple(ren(x) for x in k[:4]) + k[4:]
+                        R["flows_relationships"][nk] = {**r, **dict(zip(TULIPA_KEYS["flows_relationships"][:4], nk[:4]))}
+                for k, r in list(R["investment_group_asset_membership"].items()):
+                    if k[2] == a:
+                        R["investment_group_asset_membership"][k[:2] + (n,)] = {**r, "asset": n}
+            for table, index in R.items():
+                pos = [i for i, col in enumerate(TULIPA_KEYS[table]) if col in asset_cols]
+                for k in [k for k in index if any(k[i] == a for i in pos)]:
+                    del index[k]
+            self.report.note(f"Unit {a} ({rec.get('vintage_method')}): vintages {vintages} became separate units "
+                             + ", ".join(f"{a}_{c}" for c in vintages) + " with their own commission year parameters.")
+
+    def _shared_connection(self, a, f, t):
+        """Transport flow of a vintage asset: one shared connection consumer between all vintages and the other asset."""
+        R = self.d.rows
+        hub = f"{f}__{t}"
+        R["asset"][(hub,)] = {"asset": hub, "type": "consumer", "consumer_balance_sense": "=="}
+        tk, uk = ((hub, t), (a, hub)) if f == a else ((f, hub), (hub, a))
+        names = dict(zip(("from_asset", "to_asset"), tk))
+        unit_names = dict(zip(("from_asset", "to_asset"), uk))
+        for table in ("flow", "flow_milestone", "flow_commission", "flow_both", "flows_profiles", "flows_rep_periods_partitions"):
+            for k, r in list(R[table].items()):
+                if k[:2] != (f, t):
+                    continue
+                del R[table][k]
+                R[table][tk + k[2:]] = {**r, **names}
+                if table == "flow":
+                    R[table][uk] = {**r, **unit_names, "is_transport": False}
+                elif table == "flow_milestone":
+                    # operational cost stays on the connection, commodity price on the unit flow
+                    R[table][tk + k[2:]]["commodity_price"] = None
+                    R[table][uk + k[2:]] = {**r, **unit_names, "operational_cost": None, "investable": None}
+                elif table == "flow_commission":
+                    R[table][uk + k[2:]] = {**r, **unit_names}
+                    R[table][tk + k[2:]].update(capacity_coefficient=None, conversion_coefficient=None, producer_efficiency=None)
+                elif table == "flows_rep_periods_partitions":
+                    R[table][uk + k[2:]] = {**r, **unit_names}
+        self.report.note(f"Transport flow {f}->{t} of vintage asset {a}: shared connection {hub} with the transport flow, each vintage flows into it.")
+
+    def binary_storage_bus(self):
+        """Binary storage without a single two-way connection: its flows move to a bus asset joined to the storage
+        by two flows, which become one two-way INES link with exact_integer."""
+        R = self.d.rows
+        flow_tables = ("flow", "flow_milestone", "flow_commission", "flow_both", "flows_profiles", "flows_rep_periods_partitions")
+        for (s,), rec in list(R["asset"].items()):
+            if rec.get("type") != "storage" or rec.get("use_binary_storage_method") not in ("binary", "relaxed_binary"):
+                continue
+            ins = [k for k in R["flow"] if k[1] == s]
+            outs = [k for k in R["flow"] if k[0] == s]
+            others = {k[0] for k in ins} | {k[1] for k in outs}
+            if len(ins) == 1 and len(outs) == 1 and len(others) == 1 \
+                    and (R["asset"].get((others.pop(),)) or {}).get("type") in ("consumer", "storage"):
+                continue
+            coefs = [r.get("storage_coefficient") for k, r in R["flow_commission"].items() if k[:2] in ins + outs]
+            if any(R["flow"][k].get("is_transport") for k in ins + outs) or any(c is not None and c == c and c != 1 for c in coefs):
+                continue
+            bus = f"{s}__bus"
+            R["asset"][(bus,)] = {"asset": bus, "type": "consumer", "consumer_balance_sense": "=="}
+            carrier = next((R["flow"][k].get("carrier") for k in ins + outs if R["flow"][k].get("carrier")), None)
+            moved = {}
+            for k in ins + outs:
+                nk = (k[0], bus) if k[1] == s else (bus, k[1])
+                moved[k] = nk
+                for table in flow_tables:
+                    for kk, r in list(R[table].items()):
+                        if kk[:2] == k:
+                            del R[table][kk]
+                            R[table][nk + kk[2:]] = {**r, "from_asset": nk[0], "to_asset": nk[1]}
+            for k, r in list(R["flows_relationships"].items()):
+                if any(k[i:i + 2] in moved for i in (0, 2)):
+                    nk = tuple(x for i in (0, 2) for x in moved.get(k[i:i + 2], k[i:i + 2])) + k[4:]
+                    del R["flows_relationships"][k]
+                    R["flows_relationships"][nk] = {**r, **dict(zip(TULIPA_KEYS["flows_relationships"][:4], nk[:4]))}
+            for nk in ((bus, s), (s, bus)):
+                R["flow"][nk] = {"from_asset": nk[0], "to_asset": nk[1], "carrier": carrier, "is_transport": False}
+            self.report.note(f"Binary storage {s}: its flows go through a new balance node {bus}, joined to the storage by one two-way "
+                             f"exact_integer link (power can also pass through {bus} without entering the storage).")
+
     # ------------------------------------------------------------ topology
     def classify(self):
         d = self.d
@@ -280,10 +477,12 @@ class TulipaToInes:
             if self.atype[t] == "producer" and t not in self.commodity_source:
                 self.report.skip("flow (into a producer)", [key], "Tulipa producers cannot have inflows.")
                 continue
-            if self.unit_like(f) and self.node_like(t):
+            if self.d.get("flow", key, "is_transport") and (self.unit_like(f) or self.unit_like(t)):
+                self._unit_transport_flow(key)
+            elif self.atype[f] == "storage" and self.node_like(t) and self._storage_side_flow(key):
+                pass
+            elif self.unit_like(f) and self.node_like(t):
                 self.ines_flow[key] = [self.ent("unit__to_node", f, t)]
-                if self.d.get("flow", key, "is_transport"):
-                    self._skip_transport_attrs(key)
             elif self.node_like(f) and self.unit_like(t):
                 self.ines_flow[key] = [self.ent("node__to_unit", f, t)]
             elif self.unit_like(f) and self.unit_like(t):
@@ -316,19 +515,49 @@ class TulipaToInes:
                     self.report.note(f"Non-transport flow {f}->{t} between two nodes became a one_way INES link without capacity.")
             self.d.mark("flow", key, "is_transport")
 
-    def _skip_transport_attrs(self, key):
-        reason = "Transport flow from a unit: INES unit flows are not transport links."
-        tables = {"flow": [key], "flow_milestone": [k for k in self.d.keys("flow_milestone") if k[:2] == key],
-                  "flow_commission": [k for k in self.d.keys("flow_commission") if k[:2] == key],
-                  "flow_both": [k for k in self.d.keys("flow_both") if k[:2] == key]}
-        cols = {"flow": ["capacity", "technical_lifetime", "economic_lifetime", "discount_rate", "investment_integer"],
-                "flow_milestone": ["investable"], "flow_commission": ["fixed_cost", "investment_cost", "investment_max_limit", "investment_min_limit"],
-                "flow_both": ["decommissionable", "initial_export_units", "initial_import_units"]}
-        for table, keys in tables.items():
-            for k in keys:
-                for col in cols[table]:
-                    if self.d.given(table, k, col) is not None:
-                        self.report.skip(f"{table}.{col}", [k], reason)
+    def _storage_side_flow(self, key):
+        """Storage outflow with storage_coefficient 0 does not use stored energy: an INES unit without input sends it."""
+        d = self.d
+        coefs = [d.get("flow_commission", (*key, y), "storage_coefficient") for y in self.years]
+        if any(c is None or c != 0 for c in coefs):
+            return False
+        f, t = key
+        u = f"{f}__{t}"
+        self.ent("unit", u)
+        self.put(("unit", (u,)), "units_existing", 1.0)
+        ent = self.ent("unit__to_node", u, t)
+        self.ines_flow[key] = [ent]
+        self.side_units.add(key)
+        caps = {d.get("flow_commission", (*key, y), "capacity_coefficient") for y in self.years}
+        if caps - {0, 0.0}:
+            self.report.skip("flow_commission.capacity_coefficient", [key], "Storage flow with storage_coefficient 0 became a separate INES unit; its share of the storage power capacity is not represented.")
+        self.put(ent, "capacity", self.big)
+        for y in self.years:
+            d.mark("flow_commission", (*key, y), "conversion_coefficient")
+        self.report.note(f"Flow {f}->{t} with storage_coefficient 0 does not use the stored energy: INES unit {u} without input sends it to {t}.")
+        return True
+
+    def _unit_transport_flow(self, key):
+        """Transport flow of a unit: unit flow to a connection balance node and a transport link with its own capacity."""
+        f, t = key
+        both = self.unit_like(f) and self.unit_like(t)
+        nf = (f"{f}__{t}_from" if both else f"{f}__{t}") if self.unit_like(f) else f
+        nt = (f"{f}__{t}_to" if both else f"{f}__{t}") if self.unit_like(t) else t
+        ents = []
+        for n in {nf, nt} - {f, t}:
+            self.ent("node", n)
+            self.put(("node", (n,)), "node_type", "balance")
+        if self.unit_like(f):
+            ents.append(self.ent("unit__to_node", f, nf))
+        if self.unit_like(t):
+            ents.append(self.ent("node__to_unit", nt, t))
+        self.ines_flow[key] = ents
+        l = f"{f}__{t}"
+        self.ent("link", l)
+        nln = self.ent("node__link__node", nf, l, nt)
+        self.links[key] = {"link": ("link", (l,)), "nln": nln, "transport": True, "reverse": None}
+        self.put(("link", (l,)), "transfer_method", "only_cost" if self._has_cost(key) else "no_losses_no_cost")
+        self.report.note(f"Transport flow {f}->{t} of a unit: unit flow to the balance node {nf if self.unit_like(f) else nt} and a transport link {l} with the flow capacity.")
 
     def _has_cost(self, key):
         return any([(self.d.get("flow_milestone", (*key, y), "operational_cost") or 0) != 0 for y in self.years])
@@ -411,6 +640,107 @@ class TulipaToInes:
             self.report.note(f"Asset {a}: existing units of several commission years summed per milestone year.")
         return dict(vals)
 
+    def _commission_date(self, table, prefix, col):
+        """INES commission date when all existing units come from one commission year that differs from the milestone year."""
+        n = len(prefix)
+        rows = [k for k in self.d.keys(table) if k[:n] == tuple(prefix) and k[-2] in self.years]
+        years = {k[-1] for k in rows if (self.d.get(table, k, col) or 0) > 0}
+        if len(years) != 1:
+            return None
+        c = years.pop()
+        if not any(k[-1] == c and k[-2] != c for k in rows):
+            return None
+        return DateTime(f"{c}-01-01T00:00:00")
+
+    def apply_partitions(self):
+        """Tulipa partitions become INES time_resolution (Duration, or Array of Durations if not constant) of the unit, node or link."""
+        d = self.d
+        reps = defaultdict(list)
+        for (y, k) in d.keys("rep_periods_data"):
+            reps[y].append(k)
+        rep_info = {(y, k): (int(d.get("rep_periods_data", (y, k), "num_timesteps")), float(d.get("rep_periods_data", (y, k), "resolution")))
+                    for y in reps for k in reps[y]}
+
+        def blocks(table, key):
+            """Block lengths in hours of one partition row (None if invalid)."""
+            for col in ("specification", "partition"):
+                d.mark(table, key, col)
+            spec = d.get(table, key, "specification")
+            b = partition_blocks(spec, d.get(table, key, "partition"))
+            if not b:
+                return None
+            n, res = rep_info[key[-2:]]
+            if spec == "uniform":
+                b = [b[0]] * (n // b[0]) + ([n % b[0]] if n % b[0] else [])
+            return [round(x * res, 9) for x in b]
+
+        def resolution(rows):
+            """INES time_resolution (hours, or tuple of hours) from {(y, k): blocks}; None if it differs between years."""
+            seqs = set()
+            for y in self.years:
+                seq = []
+                for k in sorted(reps.get(y, [])):
+                    b = rows.get((y, k))
+                    if b is None:
+                        if (y, k) in rows:
+                            return None
+                        n, res = rep_info[(y, k)]
+                        b = [round(res, 9)] * n
+                    seq += b
+                seqs.add(tuple(seq))
+            if len(seqs) != 1:
+                return None
+            seq = next(iter(seqs))
+            return seq[0] if len(set(seq)) == 1 else seq
+
+        def to_ines(h):
+            if isinstance(h, tuple):
+                return Array([Duration(_hours_str(x)) for x in h])
+            return Duration(_hours_str(h))
+
+        def write(groups, what):
+            for ent, rows in groups.items():
+                h = resolution(rows)
+                if h is None:
+                    self.report.skip(what, [ent[1][0]], "INES time_resolution is the same for all periods; this partition is not.")
+                elif h != round(self.res, 9):
+                    self.put(ent, "time_resolution", to_ines(h))
+
+        assets = defaultdict(dict)
+        for key in d.keys("assets_rep_periods_partitions"):
+            a, y, k = key
+            if a in self.atype and (self.unit_like(a) or self.node_like(a)):
+                assets[("unit" if self.unit_like(a) else "node", (a,))][(y, k)] = blocks("assets_rep_periods_partitions", key)
+        unit_res = {ent[1][0]: resolution(rows) for ent, rows in assets.items() if ent[0] == "unit"}
+        links, flow_rows = defaultdict(dict), defaultdict(dict)
+        for key in d.keys("flows_rep_periods_partitions"):
+            f, t, y, k = key
+            b = blocks("flows_rep_periods_partitions", key)
+            if (f, t) in self.ines_flow:
+                flow_rows[(f, t)][(y, k)] = b
+            if (f, t) in self.links:
+                links[self.links[(f, t)]["link"]][(y, k)] = b
+            elif self.links.get((t, f), {}).get("reverse") == (f, t):
+                link = self.links[(t, f)]["link"]
+                if links[link].get((y, k), b) != b:
+                    self.report.skip("flows_rep_periods_partitions.partition", [key], "INES link has one time_resolution; the partition of the other direction is used.")
+                    continue
+                links[link][(y, k)] = b
+            elif (f, t) not in self.ines_flow:
+                self.report.skip("flows_rep_periods_partitions.partition", [key], "Flow has no INES counterpart.")
+        # unit flows: INES flow time_resolution only where it differs from the unit's
+        for key, ents in self.ines_flow.items():
+            h = resolution(flow_rows.get(key, {}))
+            if h is None:
+                self.report.skip("flows_rep_periods_partitions.partition", [key], "INES time_resolution is the same for all periods; this partition is not.")
+                continue
+            for ent in ents:
+                u = ent[1][0] if ent[0] == "unit__to_node" else ent[1][1]
+                if h != unit_res.get(u, round(self.res, 9)):
+                    self.put(ent, "time_resolution", to_ines(h))
+        write(assets, "assets_rep_periods_partitions.partition")
+        write(links, "flows_rep_periods_partitions.partition")
+
     def _decommissionable(self, a):
         return any([self.d.get("asset_both", k, "decommissionable") for k in self.d.keys("asset_both") if k[0] == a])
 
@@ -431,9 +761,8 @@ class TulipaToInes:
                 self.put(self.ines_flow[k][0], "capacity", float(cap) / coefs[k])
             for y in self.years:
                 d.mark("flow_commission", (*k, y), "capacity_coefficient")
-        if len([k for k in outs if coefs[k]]) > 1:
-            self.report.note(f"Unit {a}: Tulipa limits the weighted sum of outputs; INES gets one capacity per output flow.")
         self.put(u, "units_existing", self.year_map(self._existing(a, "initial_units")))
+        self.put(u, "commission_date", self._commission_date("asset_both", (a,), "initial_units"))
         self._invest_retire(a, u, cap, "units", "investment_method", "retirement_method")
         if self.atype[a] == "conversion":
             self.put(u, "conversion_method", "constant_efficiency")
@@ -456,7 +785,11 @@ class TulipaToInes:
             for col in ("max_ramp_up", "max_ramp_down"):
                 d.mark("asset", (a,), col)
         names = self.asset_profile_names(a, "availability")
-        if names:
+        if names and self.rep_name and len(outs) == 1:
+            # with representative periods a single-output unit gets its availability in representative period format
+            self.put(self.main_entity[a], "profile_limit_upper_representative_period", self.rep_profile_map(names))
+            self.put(self.main_entity[a], "profile_method", "upper_limit")
+        elif names:
             self.put(u, "availability", self.profile_series(names))
 
     def _commodity_for_producer(self, a, u, outs):
@@ -500,6 +833,12 @@ class TulipaToInes:
                     vals[y] = float(v) / float(cap)
             if vals:
                 limits[prm] = vals
+        closed = [y for y in self.years if not d.get("asset_milestone", (a, y), "investable")]
+        if investable and closed:
+            # no investments in milestone years where the asset is not investable
+            mx = limits.setdefault(f"{prefix}_invest_max_period", {})
+            for y in self.years:
+                mx[y] = 0.0 if y in closed else mx.get(y, self.big)
         cumulative = {}
         if not storage:
             for col, prm in (("max_available_units", f"{prefix}_max_cumulative"), ("min_available_units", f"{prefix}_min_cumulative")):
@@ -560,6 +899,7 @@ class TulipaToInes:
         n = self.ent("node", a)
         self.put(n, "node_type", "storage")
         self.put(n, "storages_existing", self.year_map(self._existing(a, "initial_storage_units")))
+        self.put(n, "storage_commission_date", self._commission_date("asset_both", (a,), "initial_storage_units"))
         cap_e = d.get("asset", (a,), "capacity_storage_energy")
         method = d.get("asset", (a,), "storage_method_energy")
         if method == "optimize_storage_capacity":
@@ -569,6 +909,8 @@ class TulipaToInes:
             self.put(n, "storage_investment_method", "no_limits" if fixed_ratio else "not_allowed")
             self.put(n, "storage_retirement_method", "economic_retirement" if self._decommissionable(a) else "not_retired")
         d.mark("asset", (a,), "storage_method_energy")
+        if not d.get("asset", (a,), "use_inter_period_constraints") and self.rep_name:
+            self.report.skip("asset.use_inter_period_constraints (false)", [a], "INES -> Tulipa links storages across representative periods by default.")
         levels = {y: d.get("asset_milestone", (a, y), "initial_storage_level") for y in self.years}
         if any(v is not None for v in levels.values()):
             self.put(n, "storage_state_fix", self.year_map(levels))
@@ -589,6 +931,7 @@ class TulipaToInes:
             self.put(n, "flow_scaling_method", "use_profile_directly")
         cap = d.get("asset", (a,), "capacity")
         links = self.storage_links.get(a, [])
+        direct = any(a in k and self.unit_like(k[0] if k[1] == a else k[1]) for k in self.ines_flow)
         binary = d.given("asset", (a,), "use_binary_storage_method")
         if binary:
             two_way = [k for k in links if self.links[k]["reverse"]]
@@ -599,7 +942,7 @@ class TulipaToInes:
             elif binary == "relaxed_binary":
                 self.report.note(f"Storage {a}: relaxed_binary written as exact_integer (INES has no relaxed version).")
         if not links:
-            if cap is not None and cap < self.big:
+            if cap is not None and cap < self.big and not direct:
                 self.report.skip("asset.capacity (storage power)", [a], "Storage has no link to a node: INES storage nodes have no power capacity (limit it in the connected units).")
             else:
                 d.mark("asset", (a,), "capacity")
@@ -616,6 +959,7 @@ class TulipaToInes:
             link = info["link"]
             self.put(link, "capacity", cap)
             self.put(link, "links_existing", self.year_map(existing))
+            self.put(link, "commission_date", self._commission_date("asset_both", (a,), "initial_units"))
             self._invest_retire(a, link, cap, "links", "investment_method", "retirement_method")
             for prm in ("investment_cost", "fixed_cost"):
                 vals = {y: d.given("asset_commission", (a, y), prm) for y in self.years}
@@ -656,6 +1000,12 @@ class TulipaToInes:
         d = self.d
         for key, info in self.links.items():
             link, nln = info["link"], info["nln"]
+            carrier = d.given("flow", key, "carrier")
+            self.put(nln, "carrier", carrier)
+            if info["reverse"]:
+                rc = d.given("flow", info["reverse"], "carrier")
+                if rc is not None and rc != carrier:
+                    self.report.skip("flow.carrier", [info["reverse"]], "INES link has one carrier; the carrier of the other direction is used.")
             costs = {y: d.given("flow_milestone", (*key, y), "operational_cost") for y in self.years}
             if info["reverse"]:
                 rcosts = {y: d.given("flow_milestone", (*info["reverse"], y), "operational_cost") for y in self.years}
@@ -674,6 +1024,7 @@ class TulipaToInes:
                     if e != i:
                         self.report.skip("flow_both.initial_import_units", [key], "INES links have the same number of units in both directions; export units used.")
             self.put(link, "links_existing", self.year_map(exp))
+            self.put(link, "commission_date", self._commission_date("flow_both", key, "initial_export_units"))
             investable = any([d.get("flow_milestone", (*key, y), "investable") for y in self.years])
             cap = d.get("flow", key, "capacity")
             limits = {}
@@ -724,7 +1075,9 @@ class TulipaToInes:
                     for y in self.years:
                         self.d.mark("asset_commission", (key[0], y), "conversion_efficiency")
                     continue
-                if entry["role"] == "unit_flow" and entry["ines"] == "other_operational_cost" and ent[0] == "node__to_unit" and len(self.ines_flow[key]) > 1:
+                if entry["role"] == "unit_flow" and entry["ines"] == "other_operational_cost" and (key in self.links or (ent[0] == "node__to_unit" and len(self.ines_flow[key]) > 1)):
+                    continue
+                if entry["ines"] == "conversion_coefficient" and key in self.side_units:
                     continue
                 if table in ("asset", "flow", "model_parameters"):
                     v = self.d.given(table, key, col)
@@ -740,8 +1093,99 @@ class TulipaToInes:
                     if other is not None and first is not None and not _same(other, first):
                         self.report.skip(f"{t2}.{c2}", [key], f"INES has one {entry['ines']}; {table}.{col} used.")
         dy = self.d.get("model_parameters", (), "discount_year")
-        if dy is None or dy == min(self.years):
-            self.d.mark("model_parameters", (), "discount_year")
+        if dy is not None and dy != min(self.years):
+            self.put(self.system, "discount_year", float(dy))
+
+    def _scale_years(self, value, factor):
+        """Constant or period map times a factor per milestone year."""
+        if is_number(value) and len(set(factor.values())) == 1:
+            return float(value) * next(iter(factor.values()))
+        if is_number(value):
+            return self.year_map({y: float(value) * f for y, f in factor.items()})
+        if isinstance(value, Map):
+            year_of = {self.period_name[y]: y for y in self.years}
+            return Map(list(value.indexes), [_scale(v, factor.get(year_of.get(i), 1.0)) for i, v in zip(value.indexes, value.values)],
+                       index_name=value.index_name)
+        return value
+
+    def apply_storage_unit_flows(self):
+        """Tulipa applies storage efficiency and power capacity also to flows between a storage and a unit.
+        INES measures the flow at the storage: G = k * F, k = charging efficiency or 1 / discharging efficiency."""
+        d = self.d
+        y0 = self.years[0]
+
+        def units(a):
+            return sum(float(d.get("asset_both", kk, "initial_units") or 0) for kk in d.keys("asset_both") if kk[0] == a and kk[1] == y0)
+
+        for key, ents in self.ines_flow.items():
+            f, t = key
+            charging = self.atype[t] == "storage"
+            if len(ents) != 1 or key in self.links or key in self.side_units or not (charging or self.atype[f] == "storage"):
+                continue
+            s, u = (t, f) if charging else (f, t)
+            ent = ents[0]
+            col = "storage_charging_efficiency" if charging else "storage_discharging_efficiency"
+            eff = {y: float(d.get("asset_commission", (s, y), col) or 1.0) for y in self.years}
+            k = {y: e if charging else 1.0 / e for y, e in eff.items()}
+            inv_k = {y: 1.0 / v for y, v in k.items()}
+            self.flow_k[key] = k[y0]
+            main = self.main_entity.get(u) == ent
+            # stricter of the unit and the storage power capacity (per unit of the unit, existing units of the first year)
+            u_cap = self.values.get((*ent, "capacity"))
+            cap = float(u_cap) if is_number(u_cap) else None
+            s_cap = d.get("asset", (s,), "capacity")
+            if is_number(s_cap) and s_cap < self.big:
+                n_u, n_s = units(u), units(s)
+                s_per_unit = float(s_cap) * n_s / n_u if n_u else float(s_cap)
+                if cap is None or s_per_unit < cap:
+                    cap = s_per_unit
+                    if self._investable(u) or self._investable(s):
+                        self.report.note(f"Flow {f}->{t}: storage {s} power capacity used as the flow capacity based on existing units; investments change it in Tulipa.")
+            if cap is not None:
+                self.put(ent, "capacity", cap * k[y0])
+            if any(v != 1 for v in eff.values()):
+                if len(set(k.values())) > 1:
+                    self.report.note(f"Flow {f}->{t}: storage efficiency varies by year; the flow capacity uses the first year.")
+                eff_key = ("unit", (u,), "efficiency")
+                if self.atype[u] == "conversion" or eff_key in self.values:
+                    side = [kk for kk in self.ines_flow if (kk[0] == u if charging else kk[1] == u)]
+                    if len(side) == 1:
+                        self.values[eff_key] = self._scale_years(self.values.get(eff_key, 1.0), eff)
+                    else:
+                        cc = (*ent, "conversion_coefficient")
+                        self.values[cc] = self._scale_years(self.values.get(cc, 1.0), inv_k)
+                for prm in ["other_operational_cost"] + (["investment_cost", "fixed_cost"] if main else []):
+                    if (*ent, prm) in self.values:
+                        self.values[(*ent, prm)] = self._scale_years(self.values[(*ent, prm)], inv_k)
+            self.report.note(f"Flow {f}->{t}: storage {s} {'charging' if charging else 'discharging'} efficiency and power capacity applied to the INES unit flow.")
+
+    def apply_combined_capacity(self):
+        """Tulipa limits sum(capacity_coefficient * output) by the asset capacity: INES combined_capacity and capacity_coefficient."""
+        y0 = self.years[0]
+        for a in self.atype:
+            if not self.unit_like(a):
+                continue
+            outs = [k for k in self.flows if k[0] == a and k in self.ines_flow]
+            cap = self.d.get("asset", (a,), "capacity")
+            coefs = {k: self.d.get("flow_commission", (*k, y0), "capacity_coefficient") or 0.0 for k in outs}
+            limited = [k for k in outs if coefs[k] > 0]
+            main = next((k for k in outs if self.ines_flow[k][0] == self.main_entity.get(a)), None)
+            # INES main flow capacity is cap / coefficient, so costs per MW scale by the coefficient
+            if main and coefs[main] > 0 and abs(coefs[main] - 1) > 1e-12:
+                for prm in ("investment_cost", "fixed_cost"):
+                    key = (*self.main_entity[a], prm)
+                    if key in self.values:
+                        self.values[key] = self._scale_years(self.values[key], {y: coefs[main] for y in self.years})
+            if len(limited) < 2 or not cap:
+                continue
+            # sum(c * output) <= combined_capacity; storage flows are measured at the storage (G = k * F)
+            self.put(("unit", (a,)), "combined_capacity", float(cap))
+            for k in outs:
+                c = coefs[k] / self.flow_k.get(k, 1.0)
+                if abs(c - 1) > 1e-12:
+                    self.put(self.ines_flow[k][0], "capacity_coefficient", c)
+                if len({self.d.get("flow_commission", (*k, y), "capacity_coefficient") for y in self.years}) > 1:
+                    self.report.note(f"Flow {k[0]}->{k[1]}: capacity_coefficient varies by commission year; the first year is used.")
 
     def apply_min_operating_point(self):
         """INES has the minimum load as the lowest operating point of an efficiency map."""
@@ -849,12 +1293,17 @@ class TulipaToInes:
         for k in self.d.keys("profiles_rep_periods"):
             self._profile_index[(k[0], k[1])].append(k)
         self.build_time()
+        self.split_vintages()
+        self.binary_storage_bus()
         self.classify()
         self.build_flows()
         self.build_assets()
         self.build_links()
         self.apply_direct()
+        self.apply_storage_unit_flows()
+        self.apply_combined_capacity()
         self.apply_min_operating_point()
+        self.apply_partitions()
         self.build_relationships()
         self.build_groups()
         self._skip_non_milestone_vintages()
